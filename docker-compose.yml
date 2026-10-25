@@ -1,0 +1,7 @@
+services:
+  task-analyzer-tests:
+    build: .
+    container_name: sdd-task-analyzer-test
+    environment:
+      - PYTHONPATH=/app
+    command: pytest tests/test_harness.py -v
