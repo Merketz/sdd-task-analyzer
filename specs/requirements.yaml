@@ -1,0 +1,174 @@
+# ==============================================================================
+# Requisitos Formais e Contrato de Domínio (SDD) — sdd-task-analyzer
+# Metodologia: Specification-Driven Development (SDD)
+# Autor: Marco Antonio Rodrigues
+# Curso: Engenharia de Software — Polo Asa Norte (UniCEUB)
+# E-mail: marco.rodrigues@sempreceub.com
+# ==============================================================================
+
+metadata:
+  project: sdd-task-analyzer
+  description: Analisador de métricas de tarefas em memória baseado em contratos executáveis
+  version: "3.0.0"
+  methodology: Specification-Driven Development (SDD)
+  author:
+    name: Marco Antonio Rodrigues
+    email: marco.rodrigues@sempreceub.com
+    institution: UniCEUB
+    course: Engenharia de Software
+
+environment:
+  python_version: ">=3.11"
+  runtime_homologation:
+    - "Python 3.11 (CI/CD Container & Ubuntu Latest)"
+    - "Python 3.14 (Ambiente Local Arch Linux)"
+  type_hints_standard: "PEP 585 & PEP 604 (X | Y, list[T], dict[K, V])"
+  docstrings_standard: "Google Style Docstrings"
+  architecture_pattern: "Single Responsibility Principle (SRP) & In-Memory Stateless Processing"
+
+dependencies:
+  allowed:
+    - name: pytest
+      version: ">=8.0.0"
+      scope: test_harness
+    - name: iniconfig
+      scope: transitive
+    - name: pluggy
+      scope: transitive
+    - name: pygments
+      scope: transitive
+  standard_library_modules:
+    - datetime
+    - logging
+    - typing
+    - dataclasses
+  prohibited:
+    - pandas
+    - numpy
+    - polars
+    - scipy
+    - pydantic
+    - dateutil
+
+system_constraints:
+  execution_mode: "100% em memória (stateless/in-memory)"
+  storage_persistence: "PROIBIDO acesso a disco, banco de dados ou chamadas de rede"
+  numeric_stability: "PROIBIDO ZeroDivisionError (retornar 0.0 determinístico para médias e taxas sem tarefas concluídas)"
+  error_handling: "Proibido capturar exceções genéricas silenciosamente (proibido 'except Exception: pass')"
+
+input_contract:
+  payload:
+    type: "list[dict[str, Any]]"
+    description: "Lista de tarefas a serem analisadas"
+  fields:
+    id:
+      type: "str | int"
+      required: true
+      rules:
+        - "Não pode ser None"
+        - "Não pode ser string vazia ou contendo apenas espaços em branco se for str"
+    titulo:
+      type: "str"
+      required: true
+      rules:
+        - "Não pode ser None"
+        - "Não pode ser string vazia"
+    prioridade:
+      type: "str"
+      required: true
+      allowed_values:
+        - BAIXA
+        - MEDIA
+        - ALTA
+    data_criacao:
+      type: "datetime | str (ISO 8601)"
+      required: true
+      rules:
+        - "Timestamp válido de criação da tarefa"
+    data_limite:
+      type: "datetime | str (ISO 8601)"
+      required: true
+      rules:
+        - "Invariante cronológica: data_limite >= data_criacao"
+    data_conclusao:
+      type: "datetime | str (ISO 8601) | None"
+      required_when: "status == 'CONCLUIDA'"
+      rules:
+        - "Invariante cronológica: data_conclusao >= data_criacao quando informada"
+        - "Obrigatória e não nula se status == 'CONCLUIDA'"
+    status:
+      type: "str"
+      required: true
+      allowed_values:
+        - PENDENTE
+        - EM_ANDAMENTO
+        - CONCLUIDA
+        - CANCELADA
+
+output_contract:
+  type: "dict[str, Any]"
+  fields:
+    total_tarefas:
+      type: "int"
+      description: "Contagem total de tarefas recebidas no lote"
+    tarefas_concluidas:
+      type: "int"
+      description: "Contagem de tarefas com status == 'CONCLUIDA'"
+    total_concluidas:
+      type: "int"
+      description: "Alias exato de tarefas_concluidas para compatibilidade contratual"
+    total_pendentes:
+      type: "int"
+      description: "Contagem de tarefas não concluídas (status != 'CONCLUIDA')"
+    tempo_medio_conclusao_horas:
+      type: "float"
+      description: "Média em horas da diferença data_conclusao - data_criacao para concluídas, arredondada em 2 casas decimais (0.0 se zero concluídas)"
+    taxa_atraso_percentual:
+      type: "float"
+      description: "Percentual de tarefas concluídas com data_conclusao > data_limite, arredondado em 2 casas decimais (0.0 se zero concluídas)"
+    metricas_por_prioridade:
+      type: "dict[str, dict[str, int | float]]"
+      description: "Métricas agregadas por nível de prioridade ('BAIXA', 'MEDIA', 'ALTA')"
+      keys:
+        - BAIXA
+        - MEDIA
+        - ALTA
+      subfields:
+        total: "int"
+        concluidas: "int"
+        tempo_medio_horas: "float"
+        taxa_atraso_percentual: "float"
+
+exceptions_hierarchy:
+  base:
+    name: TaskAnalyzerError
+    inherits: Exception
+    module: src.exceptions
+    description: "Exceção base do domínio do analisador"
+  validation:
+    name: TaskValidationError
+    inherits: TaskAnalyzerError
+    description: "Erro de validação estrutural ou violação de contrato de dados"
+  chronological:
+    name: InconsistentDatesError
+    inherits: TaskValidationError
+    description: "Violação de ordem cronológica (data_conclusao < data_criacao ou data_limite < data_criacao); deve informar o id da tarefa violadora"
+  empty_dataset:
+    name: EmptyDatasetError
+    inherits: TaskValidationError
+    description: "Disparada quando o lote estiver vazio e raise_on_empty=True"
+
+behavioral_scenarios:
+  scenario_1_valid_batch:
+    description: "Lote de 4 tarefas válido com cálculo de médias, taxas e segmentação por prioridade"
+    expected:
+      total_tarefas: 4
+      tarefas_concluidas: 3
+      total_concluidas: 3
+      total_pendentes: 1
+      tempo_medio_conclusao_horas: 3.67
+      taxa_atraso_percentual: 33.33
+  scenario_2_inconsistent_dates:
+    description: "Rejeição imediata de datas invertidas com log ERROR e InconsistentDatesError"
+  scenario_3_edge_cases:
+    description: "Proteção contra divisão por zero e suporte a entradas vazias / somente pendentes"
